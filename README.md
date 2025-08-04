@@ -30,6 +30,9 @@ Most of the core functionality and program state is encapsulated in an RSDM clas
 Simple unit tests can be run by simply loading the following page in a browser and checking the console output (refresh page with console open):
 [https://joshua.nu/really-simple-dispersion/example/runtests.html](https://joshua.nu/really-simple-dispersion/example/runtests.html)
 
+## Kubernetes Configuration
+The `k8s/` directory contains Kubernetes manifests for ECR (Amazon Elastic Container Registry) credentials management. This includes a CronJob that automatically updates Docker registry secrets across multiple namespaces to maintain fresh ECR authentication tokens. See `k8s/README.md` for setup instructions and `k8s/ECR-CRONJOB-EXPLANATION.md` for detailed explanation in Vietnamese and English.
+
 ## License
 This software is released under the MIT license [MIT](LICENSE).
 

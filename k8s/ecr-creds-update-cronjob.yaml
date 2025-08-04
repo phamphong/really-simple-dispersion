@@ -1,0 +1,132 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ecr-creds-update
+  namespace: kube-system
+  uid: 2e2ca0cf-c608-40e6-a546-51d8cc29f062
+  resourceVersion: '300447888'
+  generation: 1
+  creationTimestamp: '2025-07-02T09:03:15Z'
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: cronjob
+    meta.helm.sh/release-namespace: kube-system
+  selfLink: /apis/batch/v1/namespaces/kube-system/cronjobs/ecr-creds-update
+status:
+  lastScheduleTime: '2025-08-04T00:00:00Z'
+  lastSuccessfulTime: '2025-08-04T00:00:13Z'
+spec:
+  schedule: 0 */10 * * *
+  concurrencyPolicy: Replace
+  suspend: false
+  jobTemplate:
+    metadata:
+      creationTimestamp: null
+    spec:
+      template:
+        metadata:
+          creationTimestamp: null
+        spec:
+          volumes:
+            - name: cache-volume
+              emptyDir:
+                sizeLimit: 10Mi
+            - name: aws-envs
+              secret:
+                secretName: aws-envs
+                defaultMode: 420
+            - name: ecr-registry
+              configMap:
+                name: ecr-registry
+                defaultMode: 420
+            - name: ecr-namespace
+              configMap:
+                name: ecr-namespace
+                defaultMode: 420
+          initContainers:
+            - name: fetch-ecr-credentials
+              image: amazon/aws-cli:latest
+              command:
+                - /bin/sh
+                - '-c'
+                - |
+                  set -e
+                  echo "Fetching ECR password..."
+                  aws ecr get-login-password > /tmp/password.txt
+                  echo "ECR password stored in /tmp/password.txt"
+              envFrom:
+                - secretRef:
+                    name: aws-envs
+              resources: {}
+              volumeMounts:
+                - name: cache-volume
+                  mountPath: /tmp
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+              imagePullPolicy: Always
+          containers:
+            - name: kubectl
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/sh
+                - '-c'
+              args:
+                - |
+                  set -e
+                  echo "Reading password from /tmp/password.txt..."
+                  DOCKER_PASS=$(cat /tmp/password.txt)
+
+                  echo "Updating Docker registry secret across namespaces..."
+                  IFS=','; for NS in $SECRET_NAMESPACES; do
+                    NS=$(echo "$NS" | xargs)  # Trim any leading/trailing spaces
+                    echo "Processing namespace: '$NS'"
+
+                    # Check if the namespace exists
+                    if kubectl get namespace "$NS" > /dev/null 2>&1; then
+                      echo "Namespace '$NS' exists. Proceeding with secret update..."
+
+                      # Check if the secret exists in the namespace
+                      if kubectl get secret "$SECRET_NAME" -n "$NS" > /dev/null 2>&1; then
+                        echo "Secret '$SECRET_NAME' exists in namespace '$NS'. Updating..."
+
+                        # Generate the secret YAML and apply it to the namespace
+                        kubectl create secret docker-registry "$SECRET_NAME" \
+                            --docker-server="$DOCKER_SERVER" \
+                            --docker-username="$DOCKER_USER" \
+                            --docker-password="$DOCKER_PASS" \
+                            --docker-email="$DOCKER_EMAIL" \
+                            -n "$NS" \
+                            --dry-run=client -o yaml | kubectl apply -f -
+
+                        echo "Secret updated in namespace '$NS'"
+                      else
+                        echo "Secret '$SECRET_NAME' does not exist in namespace '$NS'. Skipping update..."
+                      fi
+                    else
+                      echo "Namespace '$NS' does not exist. Skipping..."
+                    fi
+                  done
+                  echo "All namespaces processed."
+              envFrom:
+                - configMapRef:
+                    name: ecr-registry
+                - configMapRef:
+                    name: ecr-namespace
+              resources: {}
+              volumeMounts:
+                - name: cache-volume
+                  mountPath: /tmp
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+              imagePullPolicy: Always
+          restartPolicy: OnFailure
+          terminationGracePeriodSeconds: 30
+          dnsPolicy: ClusterFirst
+          serviceAccountName: ecr-update-password
+          serviceAccount: ecr-update-password
+          securityContext: {}
+          schedulerName: default-scheduler
+      ttlSecondsAfterFinished: 60
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
